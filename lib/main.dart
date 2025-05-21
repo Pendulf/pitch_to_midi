@@ -276,6 +276,51 @@ class _HomePageState extends State<HomePage> {
     return (69 + 12 * (log(freq / 440) / ln2)).round();
   }
 
+  // --- Добавлено: Воспроизведение записанных нот ---
+
+  Future<void> _playRecordedNotes() async {
+    if (_notes.isEmpty) return;
+
+    for (var note in _notes) {
+      final freq = _frequencyFromMidi(note.pitch);
+      if (freq == null) continue;
+
+      await _playTone(freq, (note.duration * 1000).toInt());
+      await Future.delayed(const Duration(milliseconds: 50)); // интервал между нотами
+    }
+  }
+
+  double? _frequencyFromMidi(int midiNote) {
+    if (midiNote < 21 || midiNote > 108) return null;
+    return 440.0 * pow(2, (midiNote - 69) / 12);
+  }
+
+  Future<void> _playTone(double freq, int durationMs) async {
+    const sampleRate = 44100;
+    final samplesCount = (sampleRate * durationMs / 1000).round();
+
+    final buffer = Float64List(samplesCount);
+    for (int i = 0; i < samplesCount; i++) {
+      buffer[i] = sin(2 * pi * freq * i / sampleRate);
+    }
+
+    final pcmData = Int16List(samplesCount);
+    for (int i = 0; i < samplesCount; i++) {
+      pcmData[i] = (buffer[i] * 32767).toInt();
+    }
+
+    await _player.startPlayer(
+      fromDataBuffer: Uint8List.view(pcmData.buffer),
+      codec: Codec.pcm16,
+      sampleRate: sampleRate,
+      numChannels: 1,
+      whenFinished: () {},
+    );
+
+    // Ждём окончания проигрывания
+    await Future.delayed(Duration(milliseconds: durationMs));
+  }
+
   @override
   void dispose() {
     _metronomeTimer?.cancel();
@@ -289,13 +334,18 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Voice to MIDI')),
+      appBar: AppBar(title: const Text('Voice to MIDI (с отсчетом)')),
       body: Column(
         children: [
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
-            child: Text(_isRecording ? 'Остановить запись' : 'Начать запись'),
+            child: Text(_isRecording ? 'Остановить запись' : 'Начать запись с отсчетом'),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _isRecording ? null : _playRecordedNotes,
+            child: const Text('Воспроизвести записанные ноты'),
           ),
           const SizedBox(height: 20),
           Expanded(child: PianoRollWidget(notes: _notes)),
