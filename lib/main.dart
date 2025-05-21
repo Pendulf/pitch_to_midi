@@ -34,6 +34,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
+  final FlutterSoundPlayer _player = FlutterSoundPlayer();
 
   StreamController<Uint8List>? _streamController;
   StreamSubscription<Uint8List>? _streamSubscription;
@@ -43,13 +44,21 @@ class _HomePageState extends State<HomePage> {
 
   bool _isRecording = false;
   DateTime? _startTime;
-  int? _currentNote;
-  double? _noteStartTime;
+
+  static const int totalBars = 8;
+  static const double barDuration = 1.0; // 1 секунда на такт
+
+  List<int> _currentBarNotes = [];
+  int _currentBarIndex = 0;
+  final List<MidiNote> _barNotes = [];
+
+  Timer? _metronomeTimer;
 
   @override
   void initState() {
     super.initState();
     _openRecorder();
+    _player.openPlayer();
   }
 
   Future<void> _openRecorder() async {
@@ -60,15 +69,43 @@ class _HomePageState extends State<HomePage> {
     await _recorder.openRecorder();
   }
 
+  Future<void> _startRecordingWithCountdown() async {
+    setState(() {
+      _isRecording = false;
+      _notes.clear();
+      _buffer.clear();
+      _barNotes.clear();
+      _currentBarNotes.clear();
+      _currentBarIndex = 0;
+      _startTime = null;
+    });
+
+    // 4 тикания по 0.5 секунды (тик-така тик-така)
+    int tickCount = 0;
+    const int maxTicks = 4;
+    const durationBetweenTicks = Duration(milliseconds: 500);
+
+    _metronomeTimer?.cancel();
+
+    _metronomeTimer = Timer.periodic(durationBetweenTicks, (timer) async {
+      if (tickCount >= maxTicks) {
+        timer.cancel();
+        await _startRecording();
+        return;
+      }
+      await _playClick();
+      tickCount++;
+    });
+  }
+
   Future<void> _startRecording() async {
     setState(() {
       _isRecording = true;
-      _notes.clear();
-      _buffer.clear();
       _startTime = DateTime.now();
-      _currentNote = null;
-      _noteStartTime = null;
     });
+
+    // После старта записи метроном больше не играет
+    _metronomeTimer?.cancel();
 
     _streamController = StreamController<Uint8List>();
     _streamSubscription = _streamController!.stream.listen((buffer) {
@@ -83,6 +120,31 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Future<void> _playClick() async {
+    const freq = 1000.0; // частота клика 1кГц
+    const durationMs = 100;
+    final sampleRate = 44100;
+    final samplesCount = (sampleRate * durationMs / 1000).round();
+
+    final buffer = Float64List(samplesCount);
+    for (int i = 0; i < samplesCount; i++) {
+      buffer[i] = sin(2 * pi * freq * i / sampleRate);
+    }
+
+    final pcmData = Int16List(samplesCount);
+    for (int i = 0; i < samplesCount; i++) {
+      pcmData[i] = (buffer[i] * 32767).toInt();
+    }
+
+    await _player.startPlayer(
+      fromDataBuffer: Uint8List.view(pcmData.buffer),
+      codec: Codec.pcm16,
+      sampleRate: sampleRate,
+      numChannels: 1,
+      whenFinished: () {},
+    );
+  }
+
   void _processAudio(Uint8List buffer) {
     final byteData = ByteData.sublistView(buffer);
     for (int i = 0; i < byteData.lengthInBytes; i += 2) {
@@ -94,17 +156,14 @@ class _HomePageState extends State<HomePage> {
       final chunk = _buffer.sublist(0, 2048);
       _buffer.removeRange(0, 1024);
 
-      // Вычисляем RMS громкость
       double sumSquares = 0;
       for (var sample in chunk) {
         sumSquares += sample * sample;
       }
       final rms = sqrt(sumSquares / chunk.length);
 
-      const double volumeThreshold = 0.02; // Порог громкости, можно настроить
-
+      const double volumeThreshold = 0.02;
       if (rms < volumeThreshold) {
-        // Если громкость ниже порога — пропускаем этот фрагмент
         continue;
       }
 
@@ -114,14 +173,29 @@ class _HomePageState extends State<HomePage> {
         final now = DateTime.now();
         final time = now.difference(_startTime!).inMilliseconds / 1000.0;
 
-        if (_currentNote == null || _currentNote != midi) {
-          if (_currentNote != null && _noteStartTime != null) {
-            _notes.add(MidiNote(_currentNote!, _noteStartTime!, time - _noteStartTime!));
+        final barIndex = (time ~/ barDuration).clamp(0, totalBars - 1);
+
+        if (barIndex != _currentBarIndex) {
+          if (_currentBarNotes.isNotEmpty) {
+            final mostCommonNote = _mostFrequentNote(_currentBarNotes);
+            _barNotes.add(MidiNote(
+              mostCommonNote,
+              _currentBarIndex * barDuration,
+              barDuration,
+            ));
+          } else {
+            _barNotes.add(MidiNote(
+              -1,
+              _currentBarIndex * barDuration,
+              barDuration,
+            ));
           }
-          _currentNote = midi;
-          _noteStartTime = time;
-          setState(() {});
+          _currentBarNotes.clear();
+          _currentBarIndex = barIndex;
         }
+
+        _currentBarNotes.add(midi);
+        setState(() {});
       }
     }
   }
@@ -134,18 +208,47 @@ class _HomePageState extends State<HomePage> {
     _streamSubscription = null;
     _streamController = null;
 
+    _metronomeTimer?.cancel();
+
+    if (_currentBarNotes.isNotEmpty) {
+      final mostCommonNote = _mostFrequentNote(_currentBarNotes);
+      _barNotes.add(MidiNote(
+        mostCommonNote,
+        _currentBarIndex * barDuration,
+        barDuration,
+      ));
+    }
+
     setState(() {
       _isRecording = false;
-      if (_currentNote != null && _noteStartTime != null && _startTime != null) {
-        final totalTime = DateTime.now().difference(_startTime!).inMilliseconds / 1000.0;
-        _notes.add(MidiNote(_currentNote!, _noteStartTime!, totalTime - _noteStartTime!));
-        _currentNote = null;
-        _noteStartTime = null;
+      _currentBarNotes.clear();
+      _currentBarIndex = 0;
+      _notes.clear();
+      for (var barNote in _barNotes) {
+        if (barNote.pitch != -1) {
+          _notes.add(barNote);
+        }
       }
+      _barNotes.clear();
     });
   }
 
-  // Автокорреляция для pitch detection
+  int _mostFrequentNote(List<int> notes) {
+    final freqMap = <int, int>{};
+    for (var note in notes) {
+      freqMap[note] = (freqMap[note] ?? 0) + 1;
+    }
+    int maxCount = 0;
+    int mostCommon = notes[0];
+    freqMap.forEach((note, count) {
+      if (count > maxCount) {
+        maxCount = count;
+        mostCommon = note;
+      }
+    });
+    return mostCommon;
+  }
+
   double? _detectPitch(List<double> samples, int sampleRate) {
     int size = samples.length;
     int maxLag = min(1000, size ~/ 2);
@@ -175,21 +278,23 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    _metronomeTimer?.cancel();
     _streamSubscription?.cancel();
     _streamController?.close();
     _recorder.closeRecorder();
+    _player.closePlayer();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Voice to MIDI (flutter_sound)')),
+      appBar: AppBar(title: const Text('Voice to MIDI')),
       body: Column(
         children: [
           const SizedBox(height: 20),
           ElevatedButton(
-            onPressed: _isRecording ? _stopRecording : _startRecording,
+            onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
             child: Text(_isRecording ? 'Остановить запись' : 'Начать запись'),
           ),
           const SizedBox(height: 20),
@@ -211,7 +316,7 @@ class PianoRollWidget extends StatelessWidget {
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: CustomPaint(
-              size: const Size(2000, 900),
+              size: const Size(1200, 900),
               painter: PianoRollPainter(notes),
             ),
           );
