@@ -330,17 +330,28 @@ class _HomePageState extends State<HomePage> {
     _player.closePlayer();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final pianoRollHeight = screenHeight * 2 / 3;
+    final noteHeight = pianoRollHeight / 24;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Voice to MIDI (с отсчетом)')),
+      appBar: AppBar(title: const Text('Инструмент')),
       body: Column(
         children: [
-          const SizedBox(height: 20),
+          // const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
-            child: Text(_isRecording ? 'Остановить запись' : 'Начать запись с отсчетом'),
+            child: Text(_isRecording ? 'Остановить запись' : 'Начать запись'),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: pianoRollHeight,
+            child: PianoRollWidget(
+              notes: _notes,
+              noteHeight: noteHeight,
+            ),
           ),
           const SizedBox(height: 20),
           ElevatedButton(
@@ -348,7 +359,6 @@ class _HomePageState extends State<HomePage> {
             child: const Text('Воспроизвести записанные ноты'),
           ),
           const SizedBox(height: 20),
-          Expanded(child: PianoRollWidget(notes: _notes)),
         ],
       ),
     );
@@ -357,7 +367,9 @@ class _HomePageState extends State<HomePage> {
 
 class PianoRollWidget extends StatelessWidget {
   final List<MidiNote> notes;
-  const PianoRollWidget({super.key, required this.notes});
+  final double noteHeight;
+
+  const PianoRollWidget({super.key, required this.notes, required this.noteHeight});
 
   @override
   Widget build(BuildContext context) {
@@ -366,8 +378,8 @@ class PianoRollWidget extends StatelessWidget {
         : SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: CustomPaint(
-              size: const Size(1200, 900),
-              painter: PianoRollPainter(notes),
+              size: Size(1200, noteHeight * 24),
+              painter: PianoRollPainter(notes, noteHeight: noteHeight),
             ),
           );
   }
@@ -375,31 +387,78 @@ class PianoRollWidget extends StatelessWidget {
 
 class PianoRollPainter extends CustomPainter {
   final List<MidiNote> notes;
-  final double pixelsPerSecond = 100;
-  final double noteHeight = 10;
+  final double noteHeight;
+  final double pixelsPerSecond = 200;
 
-  PianoRollPainter(this.notes);
+  static const int minNote = 48; // C3
+  static const int maxNote = 71; // B4
+
+  PianoRollPainter(this.notes, {required this.noteHeight});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.blueAccent;
+    // 🔹 Фоновая заливка
+    final backgroundPaint = Paint()..color = Colors.grey[200]!;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
 
-    for (final note in notes) {
-      final left = note.start * pixelsPerSecond;
-      final width = note.duration * pixelsPerSecond;
-      final top = size.height - (note.pitch - 21) * noteHeight;
-      canvas.drawRect(Rect.fromLTWH(left, top, width, noteHeight), paint);
+    // 🔹 Горизонтальная сетка между клавишами
+    final gridPaint = Paint()
+      ..color = Colors.grey
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5;
+
+    for (int i = minNote; i <= maxNote; i++) {
+      final y = size.height - (i - minNote) * noteHeight;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
+    // 🔹 Вертикальная сетка (например, каждые 0.5 секунды)
+    const double timeStep = 0.5;
+    final verticalLinePaint = Paint()
+      ..color = Colors.grey[400]!
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5;
+
+    double maxTime = 0;
+    for (final note in notes) {
+      final noteEnd = note.start + note.duration;
+      if (noteEnd > maxTime) maxTime = noteEnd;
+    }
+
+    for (double t = 0; t <= maxTime + 1; t += timeStep) {
+      final x = t * pixelsPerSecond;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), verticalLinePaint);
+    }
+
+    // 🔹 Отрисовка нот
+    final notePaint = Paint()..color = Colors.blueAccent;
+    for (final note in notes) {
+      if (note.pitch < minNote || note.pitch > maxNote) continue;
+
+      final left = note.start * pixelsPerSecond;
+      final width = note.duration * pixelsPerSecond;
+      final top = size.height - (note.pitch - minNote + 1) * noteHeight;
+
+      canvas.drawRect(Rect.fromLTWH(left, top, width, noteHeight), notePaint);
+    }
+
+    // 🔹 Отрисовка клавиш сбоку
     final keyPaintWhite = Paint()..color = Colors.white;
     final keyPaintBlack = Paint()..color = Colors.black87;
 
-    for (int i = 21; i <= 108; i++) {
+    for (int i = minNote; i <= maxNote; i++) {
       final isBlack = _isBlackKey(i);
-      final y = size.height - (i - 21) * noteHeight;
+      final y = size.height - (i - minNote + 1) * noteHeight;
       final rect = Rect.fromLTWH(0, y, 30, noteHeight);
       canvas.drawRect(rect, isBlack ? keyPaintBlack : keyPaintWhite);
     }
+
+    // 🔹 Рамка вокруг всего piano roll
+    final borderPaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
   }
 
   bool _isBlackKey(int midiNote) {
