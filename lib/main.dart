@@ -94,6 +94,20 @@ class _HomePageState extends State<HomePage> {
       final chunk = _buffer.sublist(0, 2048);
       _buffer.removeRange(0, 1024);
 
+      // Вычисляем RMS громкость
+      double sumSquares = 0;
+      for (var sample in chunk) {
+        sumSquares += sample * sample;
+      }
+      final rms = sqrt(sumSquares / chunk.length);
+
+      const double volumeThreshold = 0.02; // Порог громкости, можно настроить
+
+      if (rms < volumeThreshold) {
+        // Если громкость ниже порога — пропускаем этот фрагмент
+        continue;
+      }
+
       final freq = _detectPitch(chunk, 44100);
       if (freq != null) {
         final midi = _frequencyToMidi(freq);
