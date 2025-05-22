@@ -43,6 +43,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
 
+  bool _isPlaying = false;
   String selectedInstrument = 'Пианино';
 
   final Map<String, String> instrumentFolders = {
@@ -308,6 +309,10 @@ Future<void> _playClick() async {
   // --- Добавлено: Воспроизведение записанных нот ---
 
   Future<void> _playRecordedNotes() async {
+  setState(() {
+    _isPlaying = true;
+  });
+
   final players = <AudioPlayer>[];
 
   for (final note in _notes) {
@@ -325,7 +330,12 @@ Future<void> _playClick() async {
 
   final totalDuration = _notes.map((n) => n.start + n.duration).reduce(max);
   await Future.delayed(Duration(milliseconds: (totalDuration * 1000).round()));
+
+  setState(() {
+    _isPlaying = false;
+  });
 }
+
 
   @override
   void dispose() {
@@ -343,7 +353,7 @@ Widget build(BuildContext context) {
   final noteHeight = pianoRollHeight / 24;
 
   return Scaffold(
-    appBar: AppBar(title: Text(selectedInstrument)),
+    appBar: AppBar(title: Text(selectedInstrument), centerTitle: true,),
     body: Column(
       children: [
         ElevatedButton(
@@ -395,7 +405,8 @@ Widget build(BuildContext context) {
       const SizedBox(width: 16),
       Expanded(
         child: ElevatedButton(
-          onPressed: _isRecording ? null : _playRecordedNotes,
+          onPressed: (_isRecording || _isPlaying) ? null : _playRecordedNotes,
+
           child: const Text('Играть'),
         ),
       ),
