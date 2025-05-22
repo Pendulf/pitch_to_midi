@@ -1,11 +1,20 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-void main() => runApp(const MyApp());
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -33,6 +42,42 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+
+  String selectedInstrument = 'Пианино';
+
+  final Map<String, String> instrumentFolders = {
+    'Пианино': 'piano',
+    'Флейта': 'flute',
+    'Бас': 'bass',
+  };
+
+  final Map<int, String> midiToFileName = {
+  48: 'c4.wav',
+  49: 'cs4.wav',
+  50: 'd4.wav',
+  51: 'ds4.wav',
+  52: 'e4.wav',
+  53: 'f4.wav',
+  54: 'fs4.wav',
+  55: 'g4.wav',
+  56: 'gs4.wav',
+  57: 'a4.wav',
+  58: 'as4.wav',
+  59: 'b4.wav',
+  60: 'c5.wav',
+  61: 'cs5.wav',
+  62: 'd5.wav',
+  63: 'ds5.wav',
+  64: 'e5.wav',
+  65: 'f5.wav',
+  66: 'fs5.wav',
+  67: 'g5.wav',
+  68: 'gs5.wav',
+  69: 'a5.wav',
+  70: 'as5.wav',
+  71: 'b5.wav',
+};
+  
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final FlutterSoundPlayer _player = FlutterSoundPlayer();
 
@@ -119,31 +164,15 @@ class _HomePageState extends State<HomePage> {
       numChannels: 1,
     );
   }
+final AudioPlayer _clickPlayer = AudioPlayer();
 
-  Future<void> _playClick() async {
-    const freq = 1000.0; // частота клика 1кГц
-    const durationMs = 100;
-    final sampleRate = 44100;
-    final samplesCount = (sampleRate * durationMs / 1000).round();
-
-    final buffer = Float64List(samplesCount);
-    for (int i = 0; i < samplesCount; i++) {
-      buffer[i] = sin(2 * pi * freq * i / sampleRate);
-    }
-
-    final pcmData = Int16List(samplesCount);
-    for (int i = 0; i < samplesCount; i++) {
-      pcmData[i] = (buffer[i] * 32767).toInt();
-    }
-
-    await _player.startPlayer(
-      fromDataBuffer: Uint8List.view(pcmData.buffer),
-      codec: Codec.pcm16,
-      sampleRate: sampleRate,
-      numChannels: 1,
-      whenFinished: () {},
-    );
+Future<void> _playClick() async {
+  try {
+    await _clickPlayer.play(AssetSource('sounds/metronome_tick.wav'));
+  } catch (e) {
+    debugPrint('Ошибка воспроизведения метронома: $e');
   }
+}
 
   void _processAudio(Uint8List buffer) {
     final byteData = ByteData.sublistView(buffer);
@@ -279,47 +308,24 @@ class _HomePageState extends State<HomePage> {
   // --- Добавлено: Воспроизведение записанных нот ---
 
   Future<void> _playRecordedNotes() async {
-    if (_notes.isEmpty) return;
+  final players = <AudioPlayer>[];
 
-    for (var note in _notes) {
-      final freq = _frequencyFromMidi(note.pitch);
-      if (freq == null) continue;
+  for (final note in _notes) {
+    final fileName = midiToFileName[note.pitch];
+    if (fileName == null) continue;
 
-      await _playTone(freq, (note.duration * 1000).toInt());
-      await Future.delayed(const Duration(milliseconds: 50)); // интервал между нотами
-    }
+    final player = AudioPlayer();
+    players.add(player);
+
+    Future.delayed(Duration(milliseconds: (note.start * 1000).round()), () {
+      final folder = instrumentFolders[selectedInstrument]!;
+      player.play(AssetSource('sounds/$folder/$fileName'));
+    });
   }
 
-  double? _frequencyFromMidi(int midiNote) {
-    if (midiNote < 21 || midiNote > 108) return null;
-    return 440.0 * pow(2, (midiNote - 69) / 12);
-  }
-
-  Future<void> _playTone(double freq, int durationMs) async {
-    const sampleRate = 44100;
-    final samplesCount = (sampleRate * durationMs / 1000).round();
-
-    final buffer = Float64List(samplesCount);
-    for (int i = 0; i < samplesCount; i++) {
-      buffer[i] = sin(2 * pi * freq * i / sampleRate);
-    }
-
-    final pcmData = Int16List(samplesCount);
-    for (int i = 0; i < samplesCount; i++) {
-      pcmData[i] = (buffer[i] * 32767).toInt();
-    }
-
-    await _player.startPlayer(
-      fromDataBuffer: Uint8List.view(pcmData.buffer),
-      codec: Codec.pcm16,
-      sampleRate: sampleRate,
-      numChannels: 1,
-      whenFinished: () {},
-    );
-
-    // Ждём окончания проигрывания
-    await Future.delayed(Duration(milliseconds: durationMs));
-  }
+  final totalDuration = _notes.map((n) => n.start + n.duration).reduce(max);
+  await Future.delayed(Duration(milliseconds: (totalDuration * 1000).round()));
+}
 
   @override
   void dispose() {
@@ -331,38 +337,75 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
   @override
-  Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final pianoRollHeight = screenHeight * 2 / 3;
-    final noteHeight = pianoRollHeight / 24;
+Widget build(BuildContext context) {
+  final screenHeight = MediaQuery.of(context).size.height;
+  final pianoRollHeight = screenHeight * 2 / 3;
+  final noteHeight = pianoRollHeight / 24;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Инструмент')),
-      body: Column(
-        children: [
-          // const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
-            child: Text(_isRecording ? 'Остановить запись' : 'Начать запись'),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: pianoRollHeight,
-            child: PianoRollWidget(
-              notes: _notes,
-              noteHeight: noteHeight,
-            ),
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _isRecording ? null : _playRecordedNotes,
-            child: const Text('Воспроизвести записанные ноты'),
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
+  return Scaffold(
+    appBar: AppBar(title: Text(selectedInstrument)),
+    body: Column(
+      children: [
+        ElevatedButton(
+  onPressed: () {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) {
+        return ListView(
+          children: instrumentFolders.keys.map((instrument) {
+            return ListTile(
+              title: Text(instrument),
+              onTap: () {
+                setState(() {
+                  selectedInstrument = instrument;
+                });
+                Navigator.pop(context);
+              },
+            );
+          }).toList(),
+        );
+      },
     );
-  }
+  },
+  child: const Text('Выбрать инструмент'),
+),
+
+        const SizedBox(height: 20),
+        SizedBox(
+          height: pianoRollHeight,
+          child: PianoRollWidget(
+            notes: _notes,
+            noteHeight: noteHeight,
+          ),
+        ),
+        const Spacer(),
+        Padding(
+  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+  child: Row(
+    children: [
+      Expanded(
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isRecording ? Colors.red : null,
+          ),
+          onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
+          child: Text(_isRecording ? 'Стоп' : 'Запись'),
+        ),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: ElevatedButton(
+          onPressed: _isRecording ? null : _playRecordedNotes,
+          child: const Text('Играть'),
+        ),
+      ),
+    ],
+  ),
+),
+      ],
+    ),
+  );
+}
 }
 
 class PianoRollWidget extends StatelessWidget {
@@ -386,6 +429,7 @@ class PianoRollWidget extends StatelessWidget {
 }
 
 class PianoRollPainter extends CustomPainter {
+  final double keyWidth = 30; // ширина области клавиш
   final List<MidiNote> notes;
   final double noteHeight;
   final double pixelsPerSecond = 200;
@@ -409,7 +453,7 @@ class PianoRollPainter extends CustomPainter {
 
     for (int i = minNote; i <= maxNote; i++) {
       final y = size.height - (i - minNote) * noteHeight;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+      canvas.drawLine(Offset(keyWidth, y), Offset(size.width, y), gridPaint);
     }
 
     // 🔹 Вертикальная сетка (например, каждые 0.5 секунды)
@@ -426,7 +470,7 @@ class PianoRollPainter extends CustomPainter {
     }
 
     for (double t = 0; t <= maxTime + 1; t += timeStep) {
-      final x = t * pixelsPerSecond;
+      final x = keyWidth + t * pixelsPerSecond;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), verticalLinePaint);
     }
 
@@ -435,7 +479,7 @@ class PianoRollPainter extends CustomPainter {
     for (final note in notes) {
       if (note.pitch < minNote || note.pitch > maxNote) continue;
 
-      final left = note.start * pixelsPerSecond;
+      final left = keyWidth + note.start * pixelsPerSecond;
       final width = note.duration * pixelsPerSecond;
       final top = size.height - (note.pitch - minNote + 1) * noteHeight;
 
@@ -449,7 +493,7 @@ class PianoRollPainter extends CustomPainter {
     for (int i = minNote; i <= maxNote; i++) {
       final isBlack = _isBlackKey(i);
       final y = size.height - (i - minNote + 1) * noteHeight;
-      final rect = Rect.fromLTWH(0, y, 30, noteHeight);
+      final rect = Rect.fromLTWH(0, y, keyWidth, noteHeight);
       canvas.drawRect(rect, isBlack ? keyPaintBlack : keyPaintWhite);
     }
 
@@ -457,7 +501,7 @@ class PianoRollPainter extends CustomPainter {
     final borderPaint = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
+      ..strokeWidth = 2;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
   }
 

@@ -34,6 +34,7 @@ dependencies:
   flutter_sound: ^9.2.13
   midi: ^0.1.0
   path_provider: ^2.0.0
+  audioplayers: ^5.2.1
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -62,30 +63,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/sounds/c4.wav
-    - assets/sounds/cs4.wav
-    - assets/sounds/d4.wav
-    - assets/sounds/ds4.wav
-    - assets/sounds/e4.wav
-    - assets/sounds/f4.wav
-    - assets/sounds/fs4.wav
-    - assets/sounds/g4.wav
-    - assets/sounds/gs4.wav
-    - assets/sounds/a4.wav
-    - assets/sounds/as4.wav
-    - assets/sounds/b4.wav
-    - assets/sounds/c5.wav
-    - assets/sounds/cs5.wav
-    - assets/sounds/d5.wav
-    - assets/sounds/ds5.wav
-    - assets/sounds/e5.wav
-    - assets/sounds/f5.wav
-    - assets/sounds/fs5.wav
-    - assets/sounds/g5.wav
-    - assets/sounds/gs5.wav
-    - assets/sounds/a5.wav
-    - assets/sounds/as5.wav
-    - assets/sounds/b5.wav
+    - assets/sounds/piano/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
