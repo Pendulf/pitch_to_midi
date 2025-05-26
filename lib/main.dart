@@ -43,6 +43,11 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
 
+  int _bpm = 120;
+
+  bool _recordingDelayPassed = false;
+  static const Duration recordingDelay = Duration(seconds: 0);
+
   bool _isPlaying = false;
   String selectedInstrument = 'Пианино';
 
@@ -91,8 +96,8 @@ class _HomePageState extends State<HomePage> {
   bool _isRecording = false;
   DateTime? _startTime;
 
-  static const int totalBars = 8;
-  static const double barDuration = 1.0; // 1 секунда на такт
+  static const int totalBars = 50;
+  double get secondsPerBeat => 60.0 / _bpm;
 
   List<int> _currentBarNotes = [];
   int _currentBarIndex = 0;
@@ -116,33 +121,34 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _startRecordingWithCountdown() async {
-    setState(() {
-      _isRecording = false;
-      _notes.clear();
-      _buffer.clear();
-      _barNotes.clear();
-      _currentBarNotes.clear();
-      _currentBarIndex = 0;
-      _startTime = null;
-    });
+  setState(() {
+    _isRecording = false;
+    _notes.clear();
+    _buffer.clear();
+    _barNotes.clear();
+    _currentBarNotes.clear();
+    _currentBarIndex = 0;
+    _startTime = null;
+    _recordingDelayPassed = false;
+  });
 
-    // 4 тикания по 0.5 секунды (тик-така тик-така)
-    int tickCount = 0;
-    const int maxTicks = 4;
-    const durationBetweenTicks = Duration(milliseconds: 500);
+  // Запускаем метроном сразу с периодом 0.5 сек
+  final interval = Duration(milliseconds: (60000 / _bpm).round());
+  _metronomeTimer = Timer.periodic(interval, (_) {
+  _playClick();
+  });
 
-    _metronomeTimer?.cancel();
+  // Через 2 секунды запускаем запись
+  await Future.delayed(recordingDelay);
+  await _startRecording();
 
-    _metronomeTimer = Timer.periodic(durationBetweenTicks, (timer) async {
-      if (tickCount >= maxTicks) {
-        timer.cancel();
-        await _startRecording();
-        return;
-      }
-      await _playClick();
-      tickCount++;
-    });
-  }
+  // Фиксируем стартовое время записи после задержки
+  setState(() {
+    _recordingDelayPassed = true;
+    _startTime = DateTime.now();
+  });
+}
+
 
   Future<void> _startRecording() async {
     setState(() {
@@ -151,7 +157,7 @@ class _HomePageState extends State<HomePage> {
     });
 
     // После старта записи метроном больше не играет
-    _metronomeTimer?.cancel();
+    //_metronomeTimer?.cancel();
 
     _streamController = StreamController<Uint8List>();
     _streamSubscription = _streamController!.stream.listen((buffer) {
@@ -176,15 +182,20 @@ Future<void> _playClick() async {
 }
 
   void _processAudio(Uint8List buffer) {
-    final byteData = ByteData.sublistView(buffer);
-    for (int i = 0; i < byteData.lengthInBytes; i += 2) {
-      final int sample = byteData.getInt16(i, Endian.little);
-      _buffer.add(sample / 32768.0);
-    }
+  if (!_recordingDelayPassed) {
+    // Игнорируем данные пока задержка не прошла
+    return;
+  }
 
-    while (_buffer.length >= 2048) {
-      final chunk = _buffer.sublist(0, 2048);
-      _buffer.removeRange(0, 1024);
+  final byteData = ByteData.sublistView(buffer);
+  for (int i = 0; i < byteData.lengthInBytes; i += 2) {
+    final int sample = byteData.getInt16(i, Endian.little);
+    _buffer.add(sample / 32768.0);
+  }
+
+    while (_buffer.length >= 8820) {
+      final chunk = _buffer.sublist(0, 8820);
+      _buffer.removeRange(0, 4410);
 
       double sumSquares = 0;
       for (var sample in chunk) {
@@ -203,21 +214,21 @@ Future<void> _playClick() async {
         final now = DateTime.now();
         final time = now.difference(_startTime!).inMilliseconds / 1000.0;
 
-        final barIndex = (time ~/ barDuration).clamp(0, totalBars - 1);
+        final barIndex = (time ~/ secondsPerBeat).clamp(0, totalBars - 1);
 
         if (barIndex != _currentBarIndex) {
           if (_currentBarNotes.isNotEmpty) {
             final mostCommonNote = _mostFrequentNote(_currentBarNotes);
             _barNotes.add(MidiNote(
               mostCommonNote,
-              _currentBarIndex * barDuration,
-              barDuration,
+              _currentBarIndex * secondsPerBeat,
+              secondsPerBeat,
             ));
           } else {
             _barNotes.add(MidiNote(
               -1,
-              _currentBarIndex * barDuration,
-              barDuration,
+              _currentBarIndex * secondsPerBeat,
+              secondsPerBeat,
             ));
           }
           _currentBarNotes.clear();
@@ -244,23 +255,35 @@ Future<void> _playClick() async {
       final mostCommonNote = _mostFrequentNote(_currentBarNotes);
       _barNotes.add(MidiNote(
         mostCommonNote,
-        _currentBarIndex * barDuration,
-        barDuration,
+        _currentBarIndex * secondsPerBeat,
+        secondsPerBeat,
       ));
     }
 
     setState(() {
-      _isRecording = false;
-      _currentBarNotes.clear();
-      _currentBarIndex = 0;
-      _notes.clear();
-      for (var barNote in _barNotes) {
-        if (barNote.pitch != -1) {
-          _notes.add(barNote);
-        }
-      }
-      _barNotes.clear();
-    });
+  _isRecording = false;
+  _recordingDelayPassed = false;
+  _currentBarNotes.clear();
+  _currentBarIndex = 0;
+  _notes.clear();
+
+  // Фильтрация и нормализация времени нот
+  final validNotes = _barNotes.where((n) => n.pitch != -1).toList();
+  if (validNotes.isNotEmpty) {
+    final minStart = validNotes.map((n) => n.start).reduce(min);
+    for (var note in validNotes) {
+      _notes.add(MidiNote(
+        note.pitch,
+        note.start - minStart, // нормализация начала
+        note.duration,
+      ));
+    }
+  }
+
+  _barNotes.clear();
+});
+
+
   }
 
   int _mostFrequentNote(List<int> notes) {
@@ -356,28 +379,66 @@ Widget build(BuildContext context) {
     appBar: AppBar(title: Text(selectedInstrument), centerTitle: true,),
     body: Column(
       children: [
-        ElevatedButton(
-  onPressed: () {
-    showModalBottomSheet(
-      context: context,
-      builder: (_) {
-        return ListView(
-          children: instrumentFolders.keys.map((instrument) {
-            return ListTile(
-              title: Text(instrument),
-              onTap: () {
-                setState(() {
-                  selectedInstrument = instrument;
-                });
-                Navigator.pop(context);
-              },
+        Row(
+  mainAxisAlignment: MainAxisAlignment.center,
+  children: [
+    ElevatedButton(
+      onPressed: () {
+        showModalBottomSheet(
+          context: context,
+          builder: (_) {
+            return ListView(
+              children: instrumentFolders.keys.map((instrument) {
+                return ListTile(
+                  title: Text(instrument),
+                  onTap: () {
+                    setState(() {
+                      selectedInstrument = instrument;
+                    });
+                    Navigator.pop(context);
+                  },
+                );
+              }).toList(),
             );
-          }).toList(),
+          },
         );
       },
-    );
-  },
-  child: const Text('Выбрать инструмент'),
+      child: const Text('Выбрать инструмент'),
+    ),
+    const SizedBox(width: 16),
+    ElevatedButton(
+      onPressed: () {
+        showModalBottomSheet(
+          context: context,
+          builder: (_) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Темп (BPM)', style: TextStyle(fontSize: 18)),
+                  Slider(
+                    value: _bpm.toDouble(),
+                    min: 40,
+                    max: 240,
+                    divisions: 200,
+                    label: '$_bpm',
+                    onChanged: (double value) {
+                      setState(() {
+                        _bpm = value.round();
+                      });
+                    },
+                  ),
+                  Text('$_bpm BPM'),
+                ],
+              ),
+            );
+          },
+        );
+      },
+      child: const Text('Настройки'),
+    ),
+  ],
 ),
 
         const SizedBox(height: 20),
@@ -386,6 +447,7 @@ Widget build(BuildContext context) {
           child: PianoRollWidget(
             notes: _notes,
             noteHeight: noteHeight,
+            secondsPerBeat: secondsPerBeat
           ),
         ),
         const Spacer(),
@@ -422,8 +484,14 @@ Widget build(BuildContext context) {
 class PianoRollWidget extends StatelessWidget {
   final List<MidiNote> notes;
   final double noteHeight;
+  final double secondsPerBeat;
 
-  const PianoRollWidget({super.key, required this.notes, required this.noteHeight});
+  const PianoRollWidget({
+    super.key,
+    required this.notes,
+    required this.noteHeight,
+    required this.secondsPerBeat,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -433,23 +501,31 @@ class PianoRollWidget extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: CustomPaint(
               size: Size(1200, noteHeight * 24),
-              painter: PianoRollPainter(notes, noteHeight: noteHeight),
+              painter: PianoRollPainter(
+                notes,
+                noteHeight: noteHeight,
+                secondsPerBeat: secondsPerBeat,
+              ),
             ),
           );
   }
 }
+
 
 class PianoRollPainter extends CustomPainter {
   final double keyWidth = 30; // ширина области клавиш
   final List<MidiNote> notes;
   final double noteHeight;
   final double pixelsPerSecond = 200;
+  
+  
 
   static const int minNote = 48; // C3
   static const int maxNote = 71; // B4
 
-  PianoRollPainter(this.notes, {required this.noteHeight});
+  PianoRollPainter(this.notes, {required this.noteHeight, required this.secondsPerBeat});
 
+  final double secondsPerBeat;
   @override
   void paint(Canvas canvas, Size size) {
     // 🔹 Фоновая заливка
@@ -457,33 +533,38 @@ class PianoRollPainter extends CustomPainter {
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
 
     // 🔹 Горизонтальная сетка между клавишами
-    final gridPaint = Paint()
-      ..color = Colors.grey
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5;
+final gridPaint = Paint()
+  ..color = Colors.grey
+  ..style = PaintingStyle.stroke
+  ..strokeWidth = 0.5;
 
-    for (int i = minNote; i <= maxNote; i++) {
-      final y = size.height - (i - minNote) * noteHeight;
-      canvas.drawLine(Offset(keyWidth, y), Offset(size.width, y), gridPaint);
-    }
+for (int i = minNote; i <= maxNote; i++) {
+  final y = size.height - (i - minNote) * noteHeight;
+  canvas.drawLine(Offset(keyWidth, y), Offset(size.width, y), gridPaint);
+}
 
-    // 🔹 Вертикальная сетка (например, каждые 0.5 секунды)
-    const double timeStep = 0.5;
-    final verticalLinePaint = Paint()
-      ..color = Colors.grey[400]!
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5;
+// 🔹 Вертикальная сетка на основе BPM // 
 
-    double maxTime = 0;
-    for (final note in notes) {
-      final noteEnd = note.start + note.duration;
-      if (noteEnd > maxTime) maxTime = noteEnd;
-    }
+double maxTime = 0;
+for (final note in notes) {
+  final noteEnd = note.start + note.duration;
+  if (noteEnd > maxTime) maxTime = noteEnd;
+}
 
-    for (double t = 0; t <= maxTime + 1; t += timeStep) {
-      final x = keyWidth + t * pixelsPerSecond;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), verticalLinePaint);
-    }
+for (double t = 0; t <= maxTime + 1; t += secondsPerBeat) {
+  final x = keyWidth + t * pixelsPerSecond;
+
+  final beatNumber = (t / secondsPerBeat).round();
+  final isStrongBeat = beatNumber % 4 == 0;
+
+  final paint = Paint()
+    ..color = isStrongBeat ? Colors.black : Colors.grey[400]!
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = isStrongBeat ? 1.2 : 0.6;
+
+  canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+}
+
 
     // 🔹 Отрисовка нот
     final notePaint = Paint()..color = Colors.blueAccent;
