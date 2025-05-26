@@ -42,11 +42,13 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  
+  List<DateTime> _tapTimes = [];
+  Timer? _metronomeTimer;
+  bool _metronomeActive = false;
+  final AudioPlayer _metronomePlayer = AudioPlayer();
 
   int _bpm = 120;
-
-  bool _recordingDelayPassed = false;
-  static const Duration recordingDelay = Duration(seconds: 0);
 
   bool _isPlaying = false;
   String selectedInstrument = 'Пианино';
@@ -83,6 +85,53 @@ class _HomePageState extends State<HomePage> {
   70: 'as5.wav',
   71: 'b5.wav',
 };
+
+  void _handleBpmTap() {
+  final now = DateTime.now();
+  _tapTimes.add(now);
+
+  // удаляем старые нажатия (более 2 секунд назад)
+  _tapTimes.removeWhere((t) => now.difference(t).inMilliseconds > 2000);
+
+  if (_tapTimes.length >= 2) {
+    final intervals = <int>[];
+    for (int i = 1; i < _tapTimes.length; i++) {
+      intervals.add(_tapTimes[i].difference(_tapTimes[i - 1]).inMilliseconds);
+    }
+    final avgMs = intervals.reduce((a, b) => a + b) / intervals.length;
+    final bpm = (60000 / avgMs).round().clamp(40, 240);
+    setState(() {
+      _bpm = bpm;
+    });
+  }
+}
+
+
+void _toggleMetronome() {
+  if (_metronomeActive) {
+    _metronomeTimer?.cancel();
+    setState(() {
+      _metronomeActive = false;
+    });
+  } else {
+    _startMetronome();
+  }
+}
+
+void _startMetronome() {
+  _metronomeTimer?.cancel();
+  final interval = Duration(milliseconds: (60000 / _bpm).round());
+
+  _metronomeTimer = Timer.periodic(interval, (_) {
+    _metronomePlayer.play(AssetSource('sounds/metronome_tick.wav'));
+  });
+
+  setState(() {
+    _metronomeActive = true;
+  });
+}
+
+
   
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final FlutterSoundPlayer _player = FlutterSoundPlayer();
@@ -102,8 +151,6 @@ class _HomePageState extends State<HomePage> {
   List<int> _currentBarNotes = [];
   int _currentBarIndex = 0;
   final List<MidiNote> _barNotes = [];
-
-  Timer? _metronomeTimer;
 
   @override
   void initState() {
@@ -129,25 +176,15 @@ class _HomePageState extends State<HomePage> {
     _currentBarNotes.clear();
     _currentBarIndex = 0;
     _startTime = null;
-    _recordingDelayPassed = false;
   });
 
-  // Запускаем метроном сразу с периодом 0.5 сек
-  final interval = Duration(milliseconds: (60000 / _bpm).round());
-  _metronomeTimer = Timer.periodic(interval, (_) {
-  _playClick();
-  });
-
-  // Через 2 секунды запускаем запись
-  await Future.delayed(recordingDelay);
   await _startRecording();
 
-  // Фиксируем стартовое время записи после задержки
   setState(() {
-    _recordingDelayPassed = true;
     _startTime = DateTime.now();
   });
 }
+
 
 
   Future<void> _startRecording() async {
@@ -155,9 +192,6 @@ class _HomePageState extends State<HomePage> {
       _isRecording = true;
       _startTime = DateTime.now();
     });
-
-    // После старта записи метроном больше не играет
-    //_metronomeTimer?.cancel();
 
     _streamController = StreamController<Uint8List>();
     _streamSubscription = _streamController!.stream.listen((buffer) {
@@ -171,21 +205,7 @@ class _HomePageState extends State<HomePage> {
       numChannels: 1,
     );
   }
-final AudioPlayer _clickPlayer = AudioPlayer();
-
-Future<void> _playClick() async {
-  try {
-    await _clickPlayer.play(AssetSource('sounds/metronome_tick.wav'));
-  } catch (e) {
-    debugPrint('Ошибка воспроизведения метронома: $e');
-  }
-}
-
   void _processAudio(Uint8List buffer) {
-  if (!_recordingDelayPassed) {
-    // Игнорируем данные пока задержка не прошла
-    return;
-  }
 
   final byteData = ByteData.sublistView(buffer);
   for (int i = 0; i < byteData.lengthInBytes; i += 2) {
@@ -249,8 +269,6 @@ Future<void> _playClick() async {
     _streamSubscription = null;
     _streamController = null;
 
-    _metronomeTimer?.cancel();
-
     if (_currentBarNotes.isNotEmpty) {
       final mostCommonNote = _mostFrequentNote(_currentBarNotes);
       _barNotes.add(MidiNote(
@@ -262,7 +280,6 @@ Future<void> _playClick() async {
 
     setState(() {
   _isRecording = false;
-  _recordingDelayPassed = false;
   _currentBarNotes.clear();
   _currentBarIndex = 0;
   _notes.clear();
@@ -363,6 +380,7 @@ Future<void> _playClick() async {
   @override
   void dispose() {
     _metronomeTimer?.cancel();
+    _metronomePlayer.dispose();
     _streamSubscription?.cancel();
     _streamController?.close();
     _recorder.closeRecorder();
@@ -407,37 +425,36 @@ Widget build(BuildContext context) {
     ),
     const SizedBox(width: 16),
     ElevatedButton(
-      onPressed: () {
-        showModalBottomSheet(
-          context: context,
-          builder: (_) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Темп (BPM)', style: TextStyle(fontSize: 18)),
-                  Slider(
-                    value: _bpm.toDouble(),
-                    min: 40,
-                    max: 240,
-                    divisions: 200,
-                    label: '$_bpm',
-                    onChanged: (double value) {
-                      setState(() {
-                        _bpm = value.round();
-                      });
-                    },
-                  ),
-                  Text('$_bpm BPM'),
-                ],
-              ),
-            );
-          },
-        );
-      },
-      child: const Text('Настройки'),
+  onPressed: _handleBpmTap,
+  style: ElevatedButton.styleFrom(
+    fixedSize: const Size.square(50), // квадратная кнопка
+    backgroundColor: _metronomeActive ? Colors.green : null,
+    padding: EdgeInsets.zero,
+  ),
+  child: GestureDetector(
+    onLongPress: _toggleMetronome,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          'BPM',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          '$_bpm',
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     ),
+  ),
+),
+
   ],
 ),
 
