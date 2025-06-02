@@ -43,6 +43,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   
+  bool _showMetronomeFlash = false; // Флаг для "мигательного" показа иконки
   final List<DateTime> _tapTimes = [];
   Timer? _metronomeTimer;
   bool _metronomeActive = false;
@@ -119,17 +120,29 @@ void _toggleMetronome() {
 }
 
 void _startMetronome() {
-  _metronomeTimer?.cancel();
-  final interval = Duration(milliseconds: (60000 / _bpm).round());
+    _metronomeTimer?.cancel();
 
-  _metronomeTimer = Timer.periodic(interval, (_) {
-    _metronomePlayer.play(AssetSource('sounds/metronome_tick.wav'));
-  });
+    final interval = Duration(milliseconds: (60000 / _bpm).round());
 
-  setState(() {
-    _metronomeActive = true;
-  });
-}
+    _metronomeTimer = Timer.periodic(interval, (timer) {
+      // На каждом "тике" показываем иконку
+      setState(() {
+        _showMetronomeFlash = true;
+      });
+      // Через 100 мс скрываем иконку (можно скорректировать длительность "мигания")
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          setState(() {
+            _showMetronomeFlash = false;
+          });
+        }
+      });
+    });
+
+    setState(() {
+      _metronomeActive = true;
+    });
+  }
 
 
   
@@ -459,49 +472,62 @@ Widget build(BuildContext context) {
       ),
       const SizedBox(width: 15),
       GestureDetector(
-        onTap: _handleBpmTap,
-        onLongPress: _toggleMetronome,
-        onTapDown: (_) => setState(() => _metronomePressed = true),
-        onTapUp: (_) => setState(() => _metronomePressed = false),
-        onTapCancel: () => setState(() => _metronomePressed = false),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Image.asset(
-              _metronomePressed
-                  ? 'assets/icons/bpm_pressed.png'
-                  : (_metronomeActive
-                      ? 'assets/icons/bpm_active.png'
-                      : 'assets/icons/bpm_idle.png'),
-              width: 65,
-              height: 65,
-            ),
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'BPM',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                    shadows: [Shadow(blurRadius: 2, color: Colors.black)],
-                  ),
-                ),
-                Text(
-                  '$_bpm',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black,
-                    shadows: [Shadow(blurRadius: 2, color: Colors.black)],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+  onTap: _handleBpmTap,
+  onLongPress: _toggleMetronome,
+  onTapDown: (_) => setState(() => _metronomePressed = true),
+  onTapUp: (_) => setState(() => _metronomePressed = false),
+  onTapCancel: () => setState(() => _metronomePressed = false),
+  child: Stack(
+    alignment: Alignment.center,
+    children: [
+      // Основная иконка: idle / pressed / active (если метроном запущен)
+      Image.asset(
+        _metronomePressed
+            ? 'assets/icons/bpm_pressed.png'
+            : (_metronomeActive
+                ? 'assets/icons/bpm_active.png'
+                : 'assets/icons/bpm_idle.png'),
+        width: 65,
+        height: 65,
       ),
+      // Надпись "BPM" и текущее значение
+      Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            'BPM',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+              shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+            ),
+          ),
+          Text(
+            '$_bpm',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.black,
+              shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+            ),
+          ),
+        ],
+      ),
+      // Мигающая иконка, показывается на короткое время (_showMetronomeFlash == true)
+      if (_showMetronomeFlash)
+        Positioned(
+          // Здесь можно скорректировать позицию (например, сделать чуть больше размер или сместить):
+          child: Image.asset(
+            'assets/icons/bpm_active.png',
+            width: 65,
+            height: 65,
+          ),
+        ),
+    ],
+  ),
+),
+
     ],
   ),
 ),
