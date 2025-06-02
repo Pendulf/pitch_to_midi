@@ -71,8 +71,7 @@ flutter:
     - assets/icons/bpm_idle.png
     - assets/icons/bpm_pressed.png
     - assets/icons/bpm_active.png
-    - assets/image/background_image.png
-
+    - assets/image/logo.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
