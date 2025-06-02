@@ -43,7 +43,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   
-  List<DateTime> _tapTimes = [];
+  final List<DateTime> _tapTimes = [];
   Timer? _metronomeTimer;
   bool _metronomeActive = false;
   final AudioPlayer _metronomePlayer = AudioPlayer();
@@ -56,7 +56,7 @@ class _HomePageState extends State<HomePage> {
   final Map<String, String> instrumentFolders = {
     'Пианино': 'piano',
     'Флейта': 'flute',
-    'Бас': 'bass',
+    'Ксилофон': 'xylophone',
   };
 
   final Map<int, String> midiToFileName = {
@@ -144,11 +144,11 @@ void _startMetronome() {
 
   bool _isRecording = false;
   DateTime? _startTime;
-
+  bool _metronomePressed = false;
   static const int totalBars = 50;
   double get secondsPerBeat => 60.0 / _bpm;
 
-  List<int> _currentBarNotes = [];
+  final List<int> _currentBarNotes = [];
   int _currentBarIndex = 0;
   final List<MidiNote> _barNotes = [];
 
@@ -388,117 +388,194 @@ void _startMetronome() {
     super.dispose();
   }
   @override
+@override
 Widget build(BuildContext context) {
   final screenHeight = MediaQuery.of(context).size.height;
   final pianoRollHeight = screenHeight * 2 / 3;
   final noteHeight = pianoRollHeight / 24;
+  final bottomPadding = 100.0; // Примерная высота нижнего блока с кнопками
 
   return Scaffold(
-    appBar: AppBar(title: Text(selectedInstrument), centerTitle: true,),
-    body: Column(
-      children: [
-        Row(
-  mainAxisAlignment: MainAxisAlignment.center,
-  children: [
-    ElevatedButton(
-      onPressed: () {
-        showModalBottomSheet(
-          context: context,
-          builder: (_) {
-            return ListView(
-              children: instrumentFolders.keys.map((instrument) {
-                return ListTile(
-                  title: Text(instrument),
-                  onTap: () {
-                    setState(() {
-                      selectedInstrument = instrument;
-                    });
-                    Navigator.pop(context);
-                  },
-                );
-              }).toList(),
-            );
-          },
-        );
-      },
-      child: const Text('Выбрать инструмент'),
-    ),
-    const SizedBox(width: 16),
-    ElevatedButton(
-  onPressed: _handleBpmTap,
-  style: ElevatedButton.styleFrom(
-    fixedSize: const Size.square(50), // квадратная кнопка
-    backgroundColor: _metronomeActive ? Colors.green : null,
-    padding: EdgeInsets.zero,
-  ),
-  child: GestureDetector(
-    onLongPress: _toggleMetronome,
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Text(
-          'BPM',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        Text(
-          '$_bpm',
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    ),
-  ),
-),
-
-  ],
-),
-
-        const SizedBox(height: 20),
-        SizedBox(
-          height: pianoRollHeight,
-          child: PianoRollWidget(
-            notes: _notes,
-            noteHeight: noteHeight,
-            secondsPerBeat: secondsPerBeat
-          ),
-        ),
-        const Spacer(),
-        Padding(
-  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-  child: Row(
-    children: [
-      Expanded(
-        child: ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _isRecording ? Colors.red : null,
-          ),
-          onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
-          child: Text(_isRecording ? 'Стоп' : 'Запись'),
+    appBar: AppBar(
+      backgroundColor: Colors.red[700],  // Просто красный фон
+      title: Text(
+        selectedInstrument,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 26,
+          fontWeight: FontWeight.bold,
         ),
       ),
-      const SizedBox(width: 16),
-      Expanded(
-        child: ElevatedButton(
-          onPressed: (_isRecording || _isPlaying) ? null : _playRecordedNotes,
-
-          child: const Text('Играть'),
+      centerTitle: true,
+  bottom: PreferredSize(
+    preferredSize: Size.fromHeight(2),
+    child: Container(
+      color: Colors.black,
+      height: 4,
+    ),
+  ),
+    ),
+    body: Container(
+      color: Colors.grey[800],
+      child: Stack(
+        children: [
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: bottomPadding - 10,
+            child: Container(
+              color: Colors.red,
+            ),
+          ),
+          
+          const SizedBox(height: 10),
+          Column(
+            children: [
+              Container(
+  color: Colors.grey[900], // <-- Чёрный фон
+  child: Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Row(
+        children: instrumentFolders.keys.map((instrument) {
+          final isActive = selectedInstrument == instrument;
+          final folderName = instrumentFolders[instrument];
+          return IconButton(
+            iconSize: 40,
+            onPressed: () {
+              setState(() {
+                selectedInstrument = instrument;
+              });
+            },
+            icon: Image.asset(
+              'assets/icons/$folderName${isActive ? "active" : "inactive"}.png',
+              width: 65,
+              height: 65,
+            ),
+            tooltip: instrument,
+          );
+        }).toList(),
+      ),
+      const SizedBox(width: 15),
+      GestureDetector(
+        onTap: _handleBpmTap,
+        onLongPress: _toggleMetronome,
+        onTapDown: (_) => setState(() => _metronomePressed = true),
+        onTapUp: (_) => setState(() => _metronomePressed = false),
+        onTapCancel: () => setState(() => _metronomePressed = false),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Image.asset(
+              _metronomePressed
+                  ? 'assets/icons/bpm_pressed.png'
+                  : (_metronomeActive
+                      ? 'assets/icons/bpm_active.png'
+                      : 'assets/icons/bpm_idle.png'),
+              width: 65,
+              height: 65,
+            ),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'BPM',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                    shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+                  ),
+                ),
+                Text(
+                  '$_bpm',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black,
+                    shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     ],
   ),
 ),
-      ],
+              
+              Divider(
+                color: Colors.black,
+                thickness: 4, // можно подкорректировать толщину    // высота с отступом, можно настроить
+                height: 0.1,
+              ),
+              SizedBox(
+                height: pianoRollHeight,
+                child: PianoRollWidget(
+                  notes: _notes,
+                  noteHeight: noteHeight,
+                  secondsPerBeat: secondsPerBeat,
+                ),
+              ),
+              const Spacer(),
+              Divider(
+                color: Colors.black,
+                thickness: 4, // можно подкорректировать толщину    // высота с отступом, можно настроить
+                height: 0.1,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red[800],
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white, width: 3),
+                          minimumSize: const Size.fromHeight(65),
+                          textStyle: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 26,
+                          ),
+                        ),
+                        onPressed: _isRecording ? _stopRecording : _startRecordingWithCountdown,
+                        child: Text(_isRecording ? 'Стоп' : 'Запись'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    if (_notes.isNotEmpty)
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red[800],
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white, width: 3),
+                            minimumSize: const Size.fromHeight(65),
+                            textStyle: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 26,
+                            ),
+                          ),
+                          onPressed: (_isRecording || _isPlaying) ? null : _playRecordedNotes,
+                          child: const Text('Играть'),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     ),
   );
 }
 }
 
-class PianoRollWidget extends StatelessWidget {
+class PianoRollWidget extends StatefulWidget {
   final List<MidiNote> notes;
   final double noteHeight;
   final double secondsPerBeat;
@@ -511,102 +588,152 @@ class PianoRollWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return notes.isEmpty
-        ? const Center(child: Text('Нет нот'))
-        : SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: CustomPaint(
-              size: Size(1200, noteHeight * 24),
-              painter: PianoRollPainter(
-                notes,
-                noteHeight: noteHeight,
-                secondsPerBeat: secondsPerBeat,
+  State<PianoRollWidget> createState() => _PianoRollWidgetState();
+}
+
+class _PianoRollWidgetState extends State<PianoRollWidget> {
+  static const int minNote = 48;
+  static const int maxNote = 71;
+  static const double keyWidth = 30;
+  static const double pixelsPerSecond = 200;
+
+  int? selectedNoteIndex;
+
+  @override
+Widget build(BuildContext context) {
+  if (widget.notes.isEmpty) {
+    return Center(
+      child: Text(
+        'Нет нот',
+        style: TextStyle(fontSize: 24, color: Colors.white, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  final pianoRollHeight = widget.noteHeight * (maxNote - minNote + 1);
+  final maxTime = widget.notes.map((n) => n.start + n.duration).fold(0.0, max);
+
+  return GestureDetector(
+    onTapDown: (details) {
+      if (selectedNoteIndex != null) {
+        final localPosition = details.localPosition;
+        int newPitch = maxNote - (localPosition.dy / widget.noteHeight).floor();
+        newPitch = newPitch.clamp(minNote, maxNote);
+
+        setState(() {
+          final original = widget.notes[selectedNoteIndex!];
+          widget.notes[selectedNoteIndex!] = MidiNote(
+            newPitch,
+            original.start,
+            original.duration,
+          );
+          selectedNoteIndex = null;
+        });
+      }
+    },
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: keyWidth + maxTime * pixelsPerSecond + 200,
+        height: pianoRollHeight,
+        child: Stack(
+          children: [
+            CustomPaint(
+              size: Size.infinite,
+              painter: PianoRollGridPainter(
+                noteHeight: widget.noteHeight,
+                secondsPerBeat: widget.secondsPerBeat,
               ),
             ),
-          );
+            for (int i = 0; i < widget.notes.length; i++)
+              _buildSelectableNote(i),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+
+  Widget _buildSelectableNote(int index) {
+    final note = widget.notes[index];
+    final left = keyWidth + note.start * pixelsPerSecond;
+    final top = (maxNote - note.pitch) * widget.noteHeight;
+    final width = note.duration * pixelsPerSecond;
+
+    final isSelected = selectedNoteIndex == index;
+
+    return Positioned(
+      left: left,
+      top: top,
+      width: width,
+      height: widget.noteHeight,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            selectedNoteIndex = index;
+          });
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.green : Colors.red,
+            border: Border.all(color: Colors.black, width: 1),
+          ),
+        ),
+      ),
+    );
   }
 }
 
 
-class PianoRollPainter extends CustomPainter {
-  final double keyWidth = 30; // ширина области клавиш
-  final List<MidiNote> notes;
+class PianoRollGridPainter extends CustomPainter {
   final double noteHeight;
-  final double pixelsPerSecond = 200;
-  
-  
-
-  static const int minNote = 48; // C3
-  static const int maxNote = 71; // B4
-
-  PianoRollPainter(this.notes, {required this.noteHeight, required this.secondsPerBeat});
-
   final double secondsPerBeat;
+  static const double pixelsPerSecond = 200;
+  static const int minNote = 48;
+  static const int maxNote = 71;
+  static const double keyWidth = 30;
+
+  PianoRollGridPainter({
+    required this.noteHeight,
+    required this.secondsPerBeat,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
-    // 🔹 Фоновая заливка
     final backgroundPaint = Paint()..color = Colors.grey[200]!;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), backgroundPaint);
 
-    // 🔹 Горизонтальная сетка между клавишами
-final gridPaint = Paint()
-  ..color = Colors.grey
-  ..style = PaintingStyle.stroke
-  ..strokeWidth = 0.5;
-
-for (int i = minNote; i <= maxNote; i++) {
-  final y = size.height - (i - minNote) * noteHeight;
-  canvas.drawLine(Offset(keyWidth, y), Offset(size.width, y), gridPaint);
-}
-
-// 🔹 Вертикальная сетка на основе BPM // 
-
-double maxTime = 0;
-for (final note in notes) {
-  final noteEnd = note.start + note.duration;
-  if (noteEnd > maxTime) maxTime = noteEnd;
-}
-
-for (double t = 0; t <= maxTime + 1; t += secondsPerBeat) {
-  final x = keyWidth + t * pixelsPerSecond;
-
-  final beatNumber = (t / secondsPerBeat).round();
-  final isStrongBeat = beatNumber % 4 == 0;
-
-  final paint = Paint()
-    ..color = isStrongBeat ? Colors.black : Colors.grey[400]!
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = isStrongBeat ? 1.2 : 0.6;
-
-  canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-}
-
-
-    // 🔹 Отрисовка нот
-    final notePaint = Paint()..color = Colors.blueAccent;
-    for (final note in notes) {
-      if (note.pitch < minNote || note.pitch > maxNote) continue;
-
-      final left = keyWidth + note.start * pixelsPerSecond;
-      final width = note.duration * pixelsPerSecond;
-      final top = size.height - (note.pitch - minNote + 1) * noteHeight;
-
-      canvas.drawRect(Rect.fromLTWH(left, top, width, noteHeight), notePaint);
-    }
-
-    // 🔹 Отрисовка клавиш сбоку
-    final keyPaintWhite = Paint()..color = Colors.white;
-    final keyPaintBlack = Paint()..color = Colors.black87;
+    final gridPaint = Paint()
+      ..color = Colors.grey
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.5;
 
     for (int i = minNote; i <= maxNote; i++) {
+      final y = (maxNote - i) * noteHeight;
+      canvas.drawLine(Offset(keyWidth, y), Offset(size.width, y), gridPaint);
+    }
+
+    final maxTime = size.width / pixelsPerSecond;
+    for (double t = 0; t <= maxTime + 1; t += secondsPerBeat) {
+      final x = keyWidth + t * pixelsPerSecond;
+      final beatNumber = (t / secondsPerBeat).round();
+      final isStrongBeat = beatNumber % 4 == 0;
+      final paint = Paint()
+        ..color = isStrongBeat ? Colors.black : Colors.grey[400]!
+        ..strokeWidth = isStrongBeat ? 1.2 : 0.6;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+
+    final keyPaintWhite = Paint()..color = Colors.white;
+    final keyPaintBlack = Paint()..color = Colors.black87;
+    for (int i = minNote; i <= maxNote; i++) {
       final isBlack = _isBlackKey(i);
-      final y = size.height - (i - minNote + 1) * noteHeight;
+      final y = (maxNote - i) * noteHeight;
       final rect = Rect.fromLTWH(0, y, keyWidth, noteHeight);
       canvas.drawRect(rect, isBlack ? keyPaintBlack : keyPaintWhite);
     }
 
-    // 🔹 Рамка вокруг всего piano roll
     final borderPaint = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.stroke
@@ -622,3 +749,4 @@ for (double t = 0; t <= maxTime + 1; t += secondsPerBeat) {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
+
